@@ -23,3 +23,5 @@
 .leave-form-summary{background:#eff5ef;border:1px solid #d8e6da;border-radius:9px;padding:14px;margin:16px 0;font-size:13px}.leave-form-summary p{margin:7px 0 0!important}.leave-consent{display:flex!important;flex-direction:row!important;align-items:flex-start!important;gap:10px!important;font-size:12px!important;line-height:1.5;margin:20px 0!important}.leave-consent input{width:18px!important;height:18px;flex-shrink:0;margin-top:2px!important;accent-color:#226b55}
 
 .school-brand-logo,.workspace-school-logo{object-fit:contain;display:block;flex-shrink:0}.school-brand-logo{width:42px;height:50px}.workspace-school-logo{width:34px;height:40px}
+
+.login-page{margin:0!important;min-height:100vh;display:grid;place-items:center;padding:24px}.login-card{background:white;padding:36px;border-radius:16px;max-width:460px;width:100%;box-shadow:0 16px 60px #1232}.login-card>img{display:block;object-fit:contain;margin:0 auto 18px}.login-card h1,.login-card>p{text-align:center;margin-bottom:18px}.login-card label{display:grid;gap:10px;margin:20px 0}.login-card input{border:1px solid #b4c9c0;padding:12px;border-radius:8px;width:100%}.login-card .alert{line-height:1.6}

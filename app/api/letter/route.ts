@@ -1,9 +1,13 @@
-import {env} from 'cloudflare:workers';
+import {isOperator} from '../../../lib/auth';
+import {NextResponse} from 'next/server';
+export const runtime='nodejs';
+export const dynamic='force-dynamic';
 import {eq} from 'drizzle-orm';
 import {getDb} from '../../../db';
 import {attendance} from '../../../db/schema';
 import {renderLeaveDocument,type LeaveDocument} from '../../../lib/leave-document';
 export async function GET(req:Request){
+ if(!await isOperator()){const target=new URL('/login',req.url);target.searchParams.set('next',new URL(req.url).pathname+new URL(req.url).search);return NextResponse.redirect(target);}
  const url=new URL(req.url),key=url.searchParams.get('key')||'';
  const headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer'};
  if(/^generated:[a-f0-9-]{36}$/.test(key)){
@@ -14,5 +18,5 @@ export async function GET(req:Request){
   }catch{return new Response('Surat belum dapat dibuka. Coba lagi.',{status:500,headers});}
  }
  if(!/^letters\/[a-f0-9-]+\.(pdf|jpg|png)$/.test(key))return new Response('Not found',{status:404,headers});
- const file=await env.BUCKET?.get(key);return file?new Response(file.body,{headers:{...headers,'Content-Type':key.endsWith('.pdf')?'application/pdf':key.endsWith('.png')?'image/png':'image/jpeg','Content-Disposition':`inline; filename="surat-izin.${key.split('.').pop()}"`}}):new Response('Not found',{status:404,headers});
+ return new Response('Lampiran lama masih tersimpan di aplikasi Sites. Gunakan aplikasi asal untuk membukanya.',{status:410,headers});
 }

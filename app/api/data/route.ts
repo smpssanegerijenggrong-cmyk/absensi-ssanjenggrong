@@ -1,11 +1,15 @@
+import {isOperator,unauthorized} from '../../../lib/auth';
+export const runtime='nodejs';
+export const dynamic='force-dynamic';
 import {validateLeaveForm,type LeaveDocument} from '../../../lib/leave-document';
 import {eq,desc,and} from 'drizzle-orm';
 import {getDb} from '../../../db';
 import {students,attendance,settings,classrooms} from '../../../db/schema';
 import {checkLocation,validCoordinates} from '../../../lib/attendance-rules';
 import {validateImport,type StudentImport,type ClassImport} from '../../../lib/import-rules';
-export async function GET(){try {const db=getDb();return Response.json({classes:await db.select().from(classrooms),students:await db.select().from(students),settings:(await db.select().from(settings).where(eq(settings.id,'school')))[0]||null,records:await db.select().from(attendance).orderBy(desc(attendance.time))},{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({error:'Data belum dapat dimuat. Silakan coba lagi.'},{status:500});}}
+export async function GET(){if(!await isOperator())return unauthorized();try {const db=getDb();return Response.json({classes:await db.select().from(classrooms),students:await db.select().from(students),settings:(await db.select().from(settings).where(eq(settings.id,'school')))[0]||null,records:await db.select().from(attendance).orderBy(desc(attendance.time))},{headers:{'Cache-Control':'no-store'}});}catch{return Response.json({error:'Data belum dapat dimuat. Silakan coba lagi.'},{status:500});}}
 export async function POST(req:Request){
+ if(!await isOperator())return unauthorized();
  try{
  if(req.headers.get('origin')&&req.headers.get('origin')!==new URL(req.url).origin)return Response.json({error:'Permintaan tidak diizinkan.'},{status:403});
  if(Number(req.headers.get('content-length')||0)>8500000)return Response.json({error:'Unggahan terlalu besar.'},{status:413});
@@ -52,5 +56,5 @@ export async function POST(req:Request){
  const document:LeaveDocument|null=leave?{version:1,id,studentName:student.name,nipd:student.nis,nisn:student.nisn,className:student.className,...leave,createdAt:time}:null;
  await db.insert(attendance).values({id,studentId:student.id,date,time,status,method,reason,note,letter,parentName:leave?.parentName||null,letterData:document?JSON.stringify(document):null,...geo});
  return Response.json({ok:true,name:student.name,letter,receipt:{name:student.name,nis:student.nis,nisn:student.nisn,gender:student.gender,className:student.className,status,time}});
- }catch(e){const message=String(e)+' '+String((e as any)?.cause);const duplicate=/UNIQUE constraint/i.test(message);return Response.json({error:duplicate?'Data sudah ada: NIPD telah terdaftar atau murid sudah diabsen hari ini.':'Gagal menyimpan. Periksa koneksi dan coba lagi.'},{status:duplicate?409:500});}
+ }catch(e){const message=String(e)+' '+String((e as any)?.cause);const duplicate=/UNIQUE constraint|duplicate key|23505/i.test(message);return Response.json({error:duplicate?'Data sudah ada: NIPD telah terdaftar atau murid sudah diabsen hari ini.':'Gagal menyimpan. Periksa koneksi dan coba lagi.'},{status:duplicate?409:500});}
 }
