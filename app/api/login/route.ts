@@ -2,6 +2,7 @@ import {NextResponse} from 'next/server';
 import {createHmac} from 'node:crypto';
 import {sql} from 'drizzle-orm';
 import {getDb} from '../../../db';
+import {storageError} from '../../../lib/server-errors';
 import {missingConfiguration,passwordMatches,makeSession,safeReturnTo,SESSION_COOKIE,SESSION_SECONDS} from '../../../lib/auth-core';
 export const runtime='nodejs';
 export async function POST(req:Request){
@@ -17,5 +18,5 @@ export async function POST(req:Request){
   if(!passwordMatches(b.password))return NextResponse.json({error:'Kata sandi tidak sesuai.'},{status:401});
   const response=NextResponse.json({ok:true,redirect:safeReturnTo(b.next)},{headers:{'Cache-Control':'no-store'}});
   response.cookies.set(SESSION_COOKIE,makeSession(),{httpOnly:true,secure:process.env.NODE_ENV==='production',sameSite:'lax',path:'/',maxAge:SESSION_SECONDS});return response;
- }catch{return NextResponse.json({error:'Login belum dapat diproses. Periksa koneksi database dan jalankan migrasi.'},{status:503});}
+ }catch(e){const failure=storageError(e);return NextResponse.json(failure,{status:failure.status});}
 }
