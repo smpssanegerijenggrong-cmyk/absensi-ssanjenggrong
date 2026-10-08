@@ -9,7 +9,7 @@ Absensi QR SMP SSA Negeri Jenggrong Ranuyoso. Next.js 16, React, Neon PostgreSQL
 3. Hubungkan database **Neon PostgreSQL** dari Vercel Marketplace/Storage ke proyek. Pastikan `DATABASE_URL` tersedia.
 4. Tambahkan `ADMIN_PASSWORD` (minimal 16 karakter, kata sandi operator) dan `AUTH_SECRET` (acak, minimal 32 karakter) di Settings → Environment Variables. Jangan pakai prefix `NEXT_PUBLIC_`.
 5. Buat struktur database melalui SQL Editor Neon dengan isi `migrations/0001_postgres.sql`. Alternatif: setelah proyek tertaut dan env ditarik ke `.env.local`, jalankan `npm run db:migrate`.
-6. Redeploy. Masuk memakai kata sandi operator, tambah/impor siswa, lalu atur lokasi sekolah.
+6. Redeploy. Buka `/admin`, masuk memakai kata sandi operator, tambah/impor siswa, lalu atur lokasi sekolah. Halaman utama dan `/scan` tersedia untuk siswa tanpa login admin.
 
 Untuk membuat secret acak di komputer sendiri: `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Simpan hasilnya hanya dalam Environment Variables. Jangan commit kredensial ke repo.
 
@@ -17,9 +17,9 @@ Jika env belum lengkap, halaman login menampilkan petunjuk penyiapan. Build tida
 
 ## Scan QR otomatis
 
-1. Masuk sebagai operator dan pastikan siswa serta lokasi sekolah sudah tersimpan.
-2. Buka aplikasi langsung melalui alamat HTTPS Vercel, pilih **Mulai absensi → Mulai scan otomatis**, lalu izinkan Kamera dan Lokasi.
-3. Arahkan QR belakang kartu ke kamera. Setelah server mengonfirmasi, nama, NIPD, kelas, dan waktu hingga detik tampil. Kamera terus membaca kartu berikutnya tanpa tombol simpan.
+1. Operator menyiapkan data siswa, kartu QR, serta titik dan radius sekolah melalui `/admin`.
+2. Siswa membuka halaman utama atau `/scan` melalui alamat HTTPS, klik **Scan QR**, lalu izinkan Kamera dan Lokasi. Tidak perlu kata sandi admin.
+3. Arahkan QR belakang kartu ke kamera. Setelah server mengonfirmasi, terdengar bunyi singkat dan muncul bukti **ABSENSI BERHASIL** berisi nama, NIPD, NISN, kelas, status, dan waktu hingga detik. Kamera terus membaca kartu berikutnya tanpa tombol simpan.
 4. Posisi GPS yang masih baru digunakan kembali dan dipantau; radius serta akurasi tetap diperiksa server. Koneksi gagal dicoba ulang otomatis. QR yang sama tidak menghasilkan catatan ganda, termasuk saat dua perangkat memindai bersamaan.
 5. Bila kamera yang dipilih tidak sesuai, gunakan pilihan Kamera. Jika kamera tidak tersedia, gunakan **Baca QR dari gambar**; pencatatan tetap melalui QR dan validasi GPS.
 
@@ -60,7 +60,7 @@ npm run test:browser
 
 ## Keamanan dan data
 
-- Semua API siswa, absensi, surat dan halaman utama memerlukan sesi operator. Cookie ditandatangani, httpOnly, SameSite=Lax dan Secure pada production; sesi berlaku 8 jam.
+- Halaman `/admin`, API pengelolaan `/api/data`, serta surat izin memerlukan sesi operator. Halaman utama dan `/scan` dibuka untuk siswa. Endpoint `/api/scan` hanya mengembalikan kesiapan sekolah dan menerima token QR pribadi + GPS; tidak menyediakan daftar siswa atau akses impor/edit. Tanggal, waktu, metode QR dan status Hadir ditentukan server. Bukti scan tidak di-cache. Cookie ditandatangani, httpOnly, SameSite=Lax dan Secure pada production; sesi berlaku 8 jam.
 - Percobaan login dibatasi melalui database. Perubahan kata sandi/secret membatalkan sesi lama.
 - Catatan izin dan isi surat disimpan bersama di PostgreSQL. QR surat membuka salinan tersimpan setelah login; bukan verifikasi identitas orang tua.
 - Tidak menggunakan filesystem lokal atau localStorage untuk database siswa.
@@ -71,4 +71,4 @@ npm run test:browser
 
 Repository ini mengganti runtime Cloudflare/Vinext dengan Next.js Node.js. Data siswa, kehadiran dan lampiran di aplikasi Sites **tidak otomatis berpindah**. Aplikasi Sites asal tetap terpisah. Ekspor/impor siswa tersedia; pemindahan riwayat absensi dan lampiran lama memerlukan migrasi data tersendiri. Jangan menerapkan SQL SQLite lama pada Neon.
 
-Versi ini tidak memerlukan akun ChatGPT untuk login, tetapi hanya ditujukan untuk guru/operator yang memiliki kata sandi. Jangan membagikan kata sandi operator kepada siswa/orang tua.
+Login admin Vercel menggunakan kata sandi operator. Siswa dapat membuka halaman scan tanpa akun dan tanpa kata sandi admin. Jangan membagikan kata sandi operator kepada siswa/orang tua.

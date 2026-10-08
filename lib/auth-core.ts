@@ -8,4 +8,4 @@ export function makeSession(now=Date.now()){const body=`v1.${Math.floor(now/1000
 export function validSession(token:string|undefined,now=Date.now()){
  try{if(!token||token.length>256)return false;const parts=token.split('.');if(parts.length!==4||parts[0]!=='v1'||!/^\d+$/.test(parts[1]))return false;const expiry=Number(parts[1]);if(expiry<=Math.floor(now/1000)||expiry>Math.floor(now/1000)+SESSION_SECONDS)return false;const expected=createHmac('sha256',signingKey()).update(parts.slice(0,3).join('.')).digest();const actual=Buffer.from(parts[3],'base64url');return actual.length===expected.length&&timingSafeEqual(actual,expected);}catch{return false;}
 }
-export function safeReturnTo(value:unknown){return typeof value==='string'&&(value==='/'||/^\/api\/letter\?key=generated(?:%3A|:)[a-f0-9-]{36}$/i.test(value))?value:'/';}
+export function safeReturnTo(value:unknown){return typeof value==='string'&&(value==='/admin'||/^\/api\/letter\?key=generated(?:%3A|:)[a-f0-9-]{36}$/i.test(value))?value:'/admin';}

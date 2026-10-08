@@ -10,8 +10,7 @@ import QRCode from 'qrcode';
 import {PGlite} from '@electric-sql/pglite';
 import {drizzle} from 'drizzle-orm/pglite';
 import * as schema from '../db/schema.ts';
-import {createDataHandlers} from '../lib/data-handlers.ts';
-import {makeSession, SESSION_COOKIE} from '../lib/auth-core.ts';
+import {createScanHandlers} from '../lib/scan-handlers.ts';
 
 // Isolated test: the real UI/camera decoder and API handlers use an in-memory
 // PostgreSQL database. No school records or production credentials are used.
@@ -23,7 +22,7 @@ process.env.AUTH_SECRET = randomBytes(32).toString('hex');
 process.env.ADMIN_PASSWORD = randomBytes(24).toString('hex');
 const pg = new PGlite();
 const db = drizzle(pg, {schema});
-const api = createDataHandlers({authorize: async () => true, database: () => db});
+const api = createScanHandlers({database: () => db});
 let server, browser;
 let serverLogs = '';
 
@@ -65,18 +64,26 @@ try {
   assert.equal(health.status, 503);
   assert.equal((await health.json()).code, 'CONFIGURATION_MISSING');
   assert.equal((await fetch(origin + '/api/data')).status, 401);
+  assert.equal((await fetch(origin + '/admin', {redirect: 'manual'})).status, 307);
+  const studentHome = await fetch(origin + '/');
+  assert.equal(studentHome.status, 200);
+  assert.match(await studentHome.text(), /Scan QR siswa/);
   const login = await fetch(origin + '/login');
   assert.match(await login.text(), /Penyiapan aplikasi belum selesai/);
   assert.match(login.headers.get('permissions-policy'), /camera=\(self\).*geolocation=\(self\)/);
 
   browser = await chromium.launch({executablePath: process.env.SCAN_TEST_BROWSER_PATH || undefined, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--use-file-for-fake-video-capture=' + feed]});
   const context = await browser.newContext({permissions: ['geolocation'], geolocation: {latitude: -7.9, longitude: 113.2, accuracy: 10}, viewport: {width: 1280, height: 900}});
-  await context.addCookies([{name: SESSION_COOKIE, value: makeSession(), url: origin, httpOnly: true, sameSite: 'Lax'}]);
+  await context.addInitScript(() => {
+    window.scanSoundCount = 0;
+    const create = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function (...args) {window.scanSoundCount++; return create.apply(this, args);};
+  });
   let attempts = 0, lostReply = true;
-  await context.route(origin + '/api/data', async route => {
+  await context.route(origin + '/api/scan', async route => {
     const req = route.request();
     const raw = req.postData();
-    if (req.method() === 'POST' && JSON.parse(raw).action === 'attendance') {
+    if (req.method() === 'POST') {
       attempts++;
       if (attempts === 1) return route.fulfill({status: 503, contentType: 'application/json', body: JSON.stringify({error: 'Simulasi koneksi tidak stabil'})});
     }
@@ -91,9 +98,10 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push(e.message));
-  await page.goto(origin);
-  await page.getByRole('button', {name: 'Mulai absensi', exact: true}).click();
-  await page.getByRole('button', {name: 'Mulai scan otomatis', exact: true}).click();
+  await page.goto(origin + '/scan');
+  assert.equal(new URL(page.url()).pathname, '/scan');
+  assert.equal((await context.cookies()).some(c => c.name === 'sanjara_session'), false);
+  await page.getByRole('button', {name: 'Scan QR', exact: true}).click();
   await page.waitForFunction(() => document.querySelector('.scanner-status b')?.textContent === '1 tercatat', null, {timeout: 25000});
   const rows = (await pg.query('SELECT * FROM attendance')).rows;
   assert.equal(rows.length, 2);
@@ -113,8 +121,12 @@ try {
   await page.getByLabel('Baca QR dari gambar', {exact: true}).setInputFiles(image);
   await page.waitForTimeout(350);
   assert.equal(attempts, before);
+  assert.match(await page.locator('.scan-receipt').innerText(), /SUDAH TERCATAT HARI INI/);
+  assert.equal(await page.evaluate(() => window.scanSoundCount >= 4), true, 'Confirmed receipts should play a brief tone');
+  await page.setViewportSize({width: 390, height: 844});
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, 'Mobile scanner must fit the viewport');
   assert.equal(errors.length, 0, errors.join('\n'));
-  console.log(JSON.stringify({cameraReadsCardsAutomatically: true, postgresRecords: 3, retriesRecoverLostResponse: true, duplicatePrevented: true, gpsValidated: true, timestampsIncludeSeconds: true, cameraStopsCleanly: true, imageQRWorks: true, setupHealth503: true, unauthenticatedAPI401: true, pageErrors: errors.length}));
+  console.log(JSON.stringify({publicScanWithoutAdminLogin: true, successSoundPlayed: true, mobileLayoutFits: true, cameraReadsCardsAutomatically: true, postgresRecords: 3, retriesRecoverLostResponse: true, duplicatePrevented: true, gpsValidated: true, timestampsIncludeSeconds: true, cameraStopsCleanly: true, imageQRWorks: true, setupHealth503: true, unauthenticatedAPI401: true, pageErrors: errors.length}));
 } finally {
   await browser?.close();
   server?.kill('SIGTERM');

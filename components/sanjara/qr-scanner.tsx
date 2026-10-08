@@ -8,8 +8,8 @@ import {attendanceTiming, clockWIB, jakartaDate} from '../../lib/attendance-time
 import {normalizeStudentQR, ScanSession} from '../../lib/qr-session';
 
 type Position = {latitude: number; longitude: number; accuracy: number; timestamp: number};
-type Receipt = {name: string; nis: string; nisn?: string; className: string; status: string; time: string; duplicate?: boolean};
-type Props = {settings: SchoolLocation | null; hasStudents: boolean; onRecorded: () => Promise<void>; onSetup: () => void};
+type Receipt = {name: string; nis: string; nisn?: string; gender?: string; className: string; status: string; time: string; duplicate?: boolean};
+type Props = {settings: SchoolLocation | null; hasStudents: boolean; onRecorded?: () => Promise<void>; onSetup?: () => void; publicMode?: boolean};
 
 function cameraMessage(error: unknown) {
   const e = error as Error;
@@ -19,7 +19,7 @@ function cameraMessage(error: unknown) {
   return e.message || 'Kamera belum dapat diaktifkan.';
 }
 
-export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: Props) {
+export default function QRScanner({settings, hasStudents, onRecorded, onSetup, publicMode = false}: Props) {
   const video = useRef<HTMLVideoElement>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const stream = useRef<MediaStream | null>(null);
@@ -32,6 +32,9 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
   const watch = useRef<number | null>(null);
   const pending = useRef<AbortController | null>(null);
   const recording = useRef(false);
+  const sound = useRef<AudioContext | null>(null);
+  const confirmed = useRef(new Map<string, {day: string; receipt: Receipt}>());
+  const lastCard = useRef('');
   const [active, setActive] = useState(false);
   const [starting, setStarting] = useState(false);
   const [working, setWorking] = useState(false);
@@ -42,6 +45,31 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [cameraId, setCameraId] = useState('');
   callback.current = onRecorded;
+
+  function prepareSound() {
+    try {
+      const Audio = window.AudioContext || (window as unknown as {webkitAudioContext?: typeof AudioContext}).webkitAudioContext;
+      if (!Audio) return;
+      sound.current ||= new Audio();
+      // Resume while the start button's user gesture is still active, including on iOS.
+      void sound.current.resume().catch(() => {});
+    } catch { /* The visual receipt remains available when audio is unsupported. */ }
+  }
+
+  function successSound(duplicate: boolean) {
+    try {
+      const audio = sound.current;
+      if (!audio || audio.state !== 'running') return;
+      const tone = audio.createOscillator(), volume = audio.createGain();
+      tone.frequency.value = duplicate ? 660 : 1100;
+      volume.gain.setValueAtTime(0, audio.currentTime);
+      volume.gain.linearRampToValueAtTime(.16, audio.currentTime + .01);
+      volume.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .14);
+      tone.connect(volume); volume.connect(audio.destination);
+      tone.onended = () => {tone.disconnect(); volume.disconnect();};
+      tone.start(); tone.stop(audio.currentTime + .15);
+    } catch { /* Sound must never affect an already saved attendance record. */ }
+  }
 
   function shutdown() {
     epoch.current++;
@@ -68,7 +96,7 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; shutdown(); };
+    return () => { mounted.current = false; shutdown(); void sound.current?.close().catch(() => {}); sound.current = null; };
   }, []);
 
   function updatePosition(p: GeolocationPosition) {
@@ -108,15 +136,14 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
 
   async function start(selectedCamera = cameraId) {
     if (starting || recording.current) return;
+    prepareSound();
     shutdown();
     const version = epoch.current;
     setActive(false);
     setError('');
     setStarting(true);
     try {
-      if (!settings) throw Error('Atur lokasi sekolah terlebih dahulu.');
-      if (!hasStudents) throw Error('Tambahkan data siswa terlebih dahulu.');
-      if (!window.isSecureContext) throw Error('Kamera memerlukan alamat HTTPS. Buka alamat aplikasi Vercel langsung di browser.');
+      if (!window.isSecureContext) throw Error('Kamera memerlukan alamat HTTPS. Buka alamat aplikasi langsung di browser.');
       if (!navigator.mediaDevices?.getUserMedia) throw Error('Browser ini tidak menyediakan akses kamera. Gunakan Chrome, Edge, atau Safari pada alamat aplikasi langsung.');
       const constraints: MediaTrackConstraints = selectedCamera ? {deviceId: {exact: selectedCamera}} : {facingMode: {ideal: 'environment'}};
       let media: MediaStream;
@@ -150,11 +177,19 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
     } finally { if (mounted.current && (version === epoch.current || !stream.current)) setStarting(false); }
   }
 
-  async function record(raw: string, version: number) {
+  async function record(raw: string, version: number, showRepeated = false) {
     if (version !== epoch.current || recording.current) return;
     const token = normalizeStudentQR(raw);
     const key = token || raw.slice(0, 100);
-    if (!session.current.begin(key, jakartaDate())) return;
+    const day = jakartaDate();
+    const cached = confirmed.current.get(key);
+    if (cached?.day === day) {
+      if (showRepeated || lastCard.current !== key) {setReceipt({...cached.receipt, duplicate: true}); setError(''); successSound(true);}
+      lastCard.current = key;
+      return;
+    }
+    if (!session.current.begin(key, day)) return;
+    lastCard.current = key;
     recording.current = true;
     setWorking(true);
     setError('');
@@ -172,7 +207,7 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
         pending.current = controller;
         const timeout = setTimeout(() => controller.abort(), 12000);
         try {
-          response = await fetch('/api/data', {method: 'POST', headers: {'Content-Type': 'application/json'}, signal: controller.signal, body: JSON.stringify({action: 'attendance', method: 'QR', token, location})});
+          response = await fetch(publicMode ? '/api/scan' : '/api/data', {method: 'POST', headers: {'Content-Type': 'application/json'}, signal: controller.signal, body: JSON.stringify(publicMode ? {token, location} : {action: 'attendance', method: 'QR', token, location})});
           result = await response.json();
           if (response.status < 500 || attempt === 2) break;
         } catch {
@@ -187,11 +222,13 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
       if (response && (response.ok || response.status === 409) && result.receipt) {
         succeeded = true;
         session.current.complete(key);
+        confirmed.current.set(key, {day, receipt: result.receipt});
         setReceipt({...result.receipt, duplicate: response.status === 409});
         setError('');
+        successSound(response.status === 409);
         if (response.ok) { setCount(n => n + 1); navigator.vibrate?.(80); }
         // A slow refresh must not stop the camera or mark a saved receipt as failed.
-        void callback.current().catch(() => {
+        void callback.current?.().catch(() => {
           if (mounted.current) setError('Kehadiran tersimpan. Tampilan rekap belum diperbarui; muat ulang setelah selesai memindai.');
         });
       } else {
@@ -235,6 +272,7 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
 
   async function scanImage(file?: File) {
     if (!file || recording.current) return;
+    prepareSound();
     if (file.size > 8 * 1024 * 1024) { setError('Gambar QR maksimal 8 MB.'); return; }
     const version = epoch.current;
     setError('');
@@ -246,13 +284,12 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
       if (version !== epoch.current || !mounted.current) return;
       const value = decode(image, image.naturalWidth, image.naturalHeight);
       if (!value) throw Error('QR tidak terbaca dari gambar. Pilih foto yang jelas dan memuat seluruh kotak QR.');
-      await record(value, version);
+      await record(value, version, true);
     } catch (e) { if (mounted.current) setError((e as Error).message); }
     finally { URL.revokeObjectURL(url); }
   }
 
   const timing = receipt && attendanceTiming(receipt.time, receipt.status);
-  const enabled = !!settings && hasStudents;
   return <div>
     <div className="scanner-status" aria-live="polite"><span><i className={active ? 'live' : ''}/>{working ? 'Memeriksa lokasi & menyimpan…' : active ? 'Pemindai aktif · tunjukkan kartu berikutnya' : 'Siap memulai pemindaian'}</span><b>{count} tercatat</b></div>
     <div className="camera-box">
@@ -263,12 +300,12 @@ export default function QRScanner({settings, hasStudents, onRecorded, onSetup}: 
     {cameras.length > 1 && <label className="camera-picker">Kamera<select aria-label="Pilih kamera" value={cameraId} disabled={starting || working} onChange={e => {setCameraId(e.target.value); if (active) void start(e.target.value);}}>{cameras.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || 'Kamera ' + (i + 1)}</option>)}</select></label>}
     <p className="scanner-gps" role="status">{gps}</p>
     {error && <div role="alert" className="alert scanner-message">{error}<small>Pemindai tetap mencoba otomatis saat QR terlihat. Kehadiran baru dinyatakan tersimpan setelah server mengonfirmasi.</small></div>}
-    {receipt && <div role="status" className={'scan-receipt ' + (receipt.duplicate ? 'duplicate' : '')}><CheckCheck size={27}/><div><small>{receipt.duplicate ? 'SUDAH TERCATAT HARI INI' : 'KEHADIRAN TERSIMPAN'}</small><h3>{receipt.name}</h3><p>NIPD {receipt.nis} · NISN {receipt.nisn || '—'} · {receipt.className}</p><b>{receipt.status} · {clockWIB(receipt.time)} WIB{timing?.label ? ' · ' + timing.label + (timing.late ? ' ' + timing.lateMinutes + ' menit' : '') : ''}</b></div></div>}
+    {receipt && <div role="status" className={'scan-receipt ' + (receipt.duplicate ? 'duplicate' : '')}><CheckCheck size={27}/><div><small>{receipt.duplicate ? 'SUDAH TERCATAT HARI INI' : 'ABSENSI BERHASIL'}</small><h3>{receipt.name}</h3><p>NIPD {receipt.nis} · NISN {receipt.nisn || '—'} · Kelas {receipt.className}</p><b>{receipt.status} · {clockWIB(receipt.time)} WIB{timing?.label ? ' · ' + timing.label + (timing.late ? ' ' + timing.lateMinutes + ' menit' : '') : ''}</b></div></div>}
     <div className="button-row">
-      {!active ? <button disabled={starting || working || !enabled} className="primary full" onClick={() => void start()}><Camera size={17}/>{starting ? 'Mengaktifkan kamera…' : 'Mulai scan otomatis'}</button> : <button className="secondary full" onClick={stop}><Square size={15}/>Hentikan pemindai</button>}
+      {!active ? <button disabled={starting || working} className="primary full" onClick={() => void start()}><Camera size={17}/>{starting ? 'Mengaktifkan kamera…' : publicMode ? 'Scan QR' : 'Mulai scan otomatis'}</button> : <button className="secondary full" onClick={stop}><Square size={15}/>Hentikan pemindai</button>}
     </div>
-    <label className={'secondary qr-image-button ' + (!enabled || working || starting ? 'disabled-upload' : '')}><ImageUp size={17}/>Baca QR dari gambar<input type="file" aria-label="Baca QR dari gambar" accept="image/png,image/jpeg,image/webp" disabled={!enabled || working || starting} onChange={e => {void scanImage(e.target.files?.[0]); e.target.value = '';}}/></label>
-    <p className="helper">{!settings ? 'Lokasi sekolah belum diatur.' : !hasStudents ? 'Tambahkan siswa terlebih dahulu.' : 'QR otomatis disimpan, lalu lanjut ke kartu berikutnya. GPS sekolah tetap wajib. Jam setelah 07.00 WIB ditandai terlambat.'}</p>
-    {!settings && <button className="text-button" onClick={onSetup}>Atur lokasi sekolah</button>}
+    <label className={'secondary qr-image-button ' + (working || starting ? 'disabled-upload' : '')}><ImageUp size={17}/>Baca QR dari gambar<input type="file" aria-label="Baca QR dari gambar" accept="image/png,image/jpeg,image/webp" disabled={working || starting} onChange={e => {void scanImage(e.target.files?.[0]); e.target.value = '';}}/></label>
+    <p className="helper">{!settings ? 'Lokasi sekolah belum diatur. Hubungi guru/operator sebelum mencatat kehadiran.' : !hasStudents ? 'Data siswa belum tersedia. Guru/operator perlu menambahkan atau mengimpor siswa sebelum kartu dapat dicatat.' : 'Kartu dibaca dan disimpan otomatis. Bunyi singkat serta data siswa muncul setelah server mengonfirmasi. QR yang sama hanya tercatat sekali sehari.'}</p>
+    {!settings && onSetup && <button className="text-button" onClick={onSetup}>Atur lokasi sekolah</button>}
   </div>;
 }
