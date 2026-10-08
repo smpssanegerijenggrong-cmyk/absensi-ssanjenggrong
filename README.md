@@ -1,6 +1,6 @@
 # SANJARA Hadir — Vercel Edition
 
-Absensi QR SMP SSA Negeri Jenggrong Ranuyoso. Next.js 16, React, Neon PostgreSQL dan Drizzle. Mendukung lokasi sekolah, impor siswa, kartu ID dua sisi, surat izin otomatis dan unduh rekap CSV. Logo dan desain sekolah tetap digunakan.
+Absensi QR SMP SSA Negeri Jenggrong Ranuyoso. Next.js 16, React, Neon PostgreSQL dan Drizzle. Mendukung lokasi sekolah, impor siswa, kartu ID dua sisi, surat izin otomatis dan unduh rekap CSV. Logo asli sekolah tetap digunakan. Kartu siswa memakai desain hijau tua, putih gading dan emas, dua sisi dengan tulisan BERKARISMA serta QR kontras.
 
 ## Pengaturan Vercel
 
@@ -72,3 +72,11 @@ npm run test:browser
 Repository ini mengganti runtime Cloudflare/Vinext dengan Next.js Node.js. Data siswa, kehadiran dan lampiran di aplikasi Sites **tidak otomatis berpindah**. Aplikasi Sites asal tetap terpisah. Ekspor/impor siswa tersedia; pemindahan riwayat absensi dan lampiran lama memerlukan migrasi data tersendiri. Jangan menerapkan SQL SQLite lama pada Neon.
 
 Login admin Vercel menggunakan kata sandi operator. Siswa dapat membuka halaman scan tanpa akun dan tanpa kata sandi admin. Jangan membagikan kata sandi operator kepada siswa/orang tua.
+
+## Desain kartu siswa
+
+Buka `/admin` → **ID card siswa**. Kartu depan menampilkan logo asli, nama, NIPD, NISN, kelas, jenis kelamin, tahun pelajaran dan BERKARISMA. Kartu belakang memakai QR pribadi dengan margin putih. Nama panjang disesuaikan tanpa memotong identitas.
+
+Unduh PNG depan/belakang atau pilih siswa dan cetak/PDF. Ukuran setiap sisi 54 × 85,6 mm; gunakan skala cetak 100% dan matikan header/footer browser. Mengubah desain tidak mengubah token siswa. QR pada kartu lama tetap berlaku selama token siswa di database sama.
+
+Contoh desain dapat dirender ulang dengan `node --experimental-strip-types scripts/preview-card.mjs /absolute/path/preview.png`. Contoh memakai data ilustrasi dan tidak menambahkan siswa ke database.
